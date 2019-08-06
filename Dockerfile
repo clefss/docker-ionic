@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractiv \
     # https://www.npmjs.com/package/ionic
     IONIC_VERSION=4.10.3
 
-# dependences
+# dependencies
 WORKDIR /tmp
 
 RUN mkdir /app && \

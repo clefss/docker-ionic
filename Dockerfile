@@ -1,83 +1,84 @@
-FROM ubuntu:18.04
+FROM clefss/base:1.0
 
 LABEL maintainer "Clefss <clefss@protonmail.com>"
 
-ENV DEBIAN_FRONTEND=noninteractiv \
-    TERM=xterm \
-    # https://cordova.apache.org/docs/en/8.x/guide/platforms/android/#installing-the-requirements
-    JAVA_VERSION=8 \
+ENV ANDROID_SDK_URL="https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip" \
     # https://github.com/gradle/gradle/releases
-    GRADLE_VERSION=5.2.1 \
-    # https://developer.android.com/studio/releases/sdk-tools V26.1.1
-    ANDROID_SDK_URL="https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip" \
-    # https://developer.android.com/studio/releases/build-tools
-    ANDROID_BUILD_TOOLS_VERSION=28.0.3 \
-    # https://source.android.com/setup/start/build-numbers
-    ANDROID_APIS="android-28" \
-    ANDROID_HOME="/opt/android" \
-    # https://nodejs.org/en/
-    NODE_VERSION=11.10.0 \
+    GRADLE_VERSION=5.6.2 \
+    # https://nodejs.org
+    NODE_VERSION=10.16.3 \
     # https://www.npmjs.com/package/cordova
-    CORDOVA_VERSION=8.1.2 \
+    CORDOVA_VERSION=9.0.0 \
     # https://www.npmjs.com/package/ionic
-    IONIC_VERSION=4.10.3
+    IONIC_VERSION=5.2.8 \
+    # https://www.npmjs.com/package/yarn
+    YARN_VERSION=1.17.3
 
 # dependencies
 WORKDIR /tmp
 
-RUN mkdir /app && \
-    buildDeps='software-properties-common'; \
-    set -x && \
+RUN set -x && \
+    buildDeps="unzip wget" && \
     dpkg --add-architecture i386 && \
-    apt-get -qq update && \
-    apt-get -qq install -y $buildDeps curl git ca-certificates bzip2 openssh-client unzip wget libncurses5:i386 libstdc++6:i386 zlib1g:i386 --no-install-recommends
+    apt-get update -qq && \
+    apt-get upgrade -qq -y && \
+    apt-get install -qq -y ${buildDeps} ca-certificates libncurses5:i386 libstdc++6:i386 zlib1g:i386 --no-install-recommends
 
-# java # use WebUpd8 PPA
-RUN add-apt-repository ppa:webupd8team/java -y && \
-    apt-get -qq update -y && \
-    # automatically accept the Oracle license
-    echo oracle-java"$JAVA_VERSION"-installer shared/accepted-oracle-license-v1-1 select true | /usr/bin/debconf-set-selections && \
-    apt-get -qq install -y oracle-java"$JAVA_VERSION"-installer oracle-java"$JAVA_VERSION"-set-default
+# java
+ENV JAVA_HOME /opt/java
+ENV PATH ${PATH}:${JAVA_HOME}/bin
 
-ENV JAVA_HOME=/usr/lib/jvm/java-"$JAVA_VERSION"-oracle
+COPY java-update-alternatives.sh /tmp/java-update-alternatives.sh
+
+RUN mkdir -p /opt/java && \
+    wget -O java.tar.gz -c https://www.dropbox.com/s/k3grov7q9z3bxyy/jdk-8u221-linux-x64.tar.gz?dl=1 && \
+    tar -xf java.tar.gz -C /opt/java --strip-components=1 && \
+    chmod +x java-update-alternatives.sh && \
+    ./java-update-alternatives.sh
 
 # gradle
-RUN wget https://services.gradle.org/distributions/gradle-"$GRADLE_VERSION"-bin.zip && \
-    mkdir /opt/gradle && \
-    unzip -d /opt/gradle gradle-"$GRADLE_VERSION"-bin.zip
+ENV PATH ${PATH}:/opt/gradle-${GRADLE_VERSION}/bin
 
-ENV PATH=$PATH:/opt/gradle/gradle-"$GRADLE_VERSION"/bin
+RUN wget -O gradle-bin.zip https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
+    unzip -d /opt gradle-bin.zip
 
 # android
-WORKDIR /opt/android
+ENV ANDROID_HOME /opt/android
+ENV PATH ${PATH}:${ANDROID_HOME}/platform-tools:${ANDROID_HOME}/tools:${ANDROID_HOME}/build-tools
 
-ENV PATH $PATH:"$ANDROID_HOME"/platform-tools:"$ANDROID_HOME"/tools:"$ANDROID_HOME"/build-tools/"$ANDROID_BUILD_TOOLS_VERSION"
+COPY android-packages.sh /tmp/android-packages.sh
 
-RUN wget -O tools.zip "$ANDROID_SDK_URL" && \
-    unzip tools.zip && \
-    rm tools.zip && \
-    # echo y | android update sdk -a -u -t platform-tools,"$ANDROID_APIS",build-tools-"$ANDROID_BUILD_TOOLS_VERSION" && \
-    yes Y | "$ANDROID_HOME"/tools/bin/sdkmanager "build-tools;$ANDROID_BUILD_TOOLS_VERSION" "platforms;$ANDROID_APIS" "platform-tools" && \
-    chmod a+x -R "$ANDROID_HOME" && \
-    chown -R root:root "$ANDROID_HOME"
+RUN mkdir -p ${ANDROID_HOME} && \
+    wget -O tools.zip ${ANDROID_SDK_URL} && \
+    unzip -d ${ANDROID_HOME} tools.zip && \
+    mkdir -p /root/.android && \
+    echo "### User Sources for Android SDK Manager" >>/root/.android/repositories.cfg && \
+    chmod +x android-packages.sh && \
+    ./android-packages.sh && \
+    chmod a+x -R ${ANDROID_HOME} && \
+    chown -R root:root ${ANDROID_HOME}
 
 # node
-WORKDIR /opt/node
+ENV PATH ${PATH}:/opt/node/bin
 
-RUN curl -sL https://nodejs.org/dist/v"$NODE_VERSION"/node-v"$NODE_VERSION"-linux-x64.tar.gz | tar xz --strip-components=1
+RUN mkdir -p /opt/node && \
+    wget -O node-linux-x64.tar.gz https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz && \
+    tar -xf node-linux-x64.tar.gz -C /opt/node --strip-components=1
 
-ENV PATH=$PATH:/opt/node/bin
-
-# ionic & cordova
-WORKDIR /tmp
-
-RUN npm i -g ionic@"$IONIC_VERSION" cordova@"$CORDOVA_VERSION" && \
-    ionic config set -g daemon.updates false && \
+# cordova
+RUN npm i -g cordova@${CORDOVA_VERSION} && \
     cordova telemetry off
+
+# ionic
+RUN npm i -g ionic@${IONIC_VERSION} && \
+    ionic config set -g daemon.updates false
+
+# yarn
+RUN npm i -g yarn@${YARN_VERSION}
 
 # clean up
 RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    apt-get purge -y --auto-remove $buildDeps && \
+    apt-get purge -y --auto-remove ${buildDeps} && \
     apt-get autoremove -y && \
     apt-get clean
 
